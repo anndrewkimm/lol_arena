@@ -60,6 +60,28 @@ const LoLArena = () => {
     return null;
   };
 
+  // Get augment image URL
+  const getAugmentImageUrl = async (augmentId) => {
+    const cacheKey = `augment_${augmentId}`;
+    
+    if (imageCache[cacheKey]) {
+      return imageCache[cacheKey];
+    }
+
+    try {
+      const response = await fetch(`${API_BASE}/api/images/augment/${augmentId}`);
+      const data = await response.json();
+      
+      if (data.success) {
+        setImageCache(prev => ({ ...prev, [cacheKey]: data.imageUrl }));
+        return data.imageUrl;
+      }
+    } catch (err) {
+      console.error('Failed to get augment image:', err);
+    }
+    
+    return null;
+  };
 
   // Preload images for better UX
   const preloadMatchImages = async (matches) => {
@@ -106,6 +128,18 @@ const LoLArena = () => {
         }
       } catch (err) {
         console.error('Failed to batch fetch item images:', err);
+      }
+    }
+
+    // Preload augment images
+    if (augmentIds.length > 0) {
+      const uniqueAugmentIds = [...new Set(augmentIds)];
+      for (const augmentId of uniqueAugmentIds) {
+        try {
+          await getAugmentImageUrl(augmentId);
+        } catch (err) {
+          console.error(`Failed to preload augment image for ${augmentId}:`, err);
+        }
       }
     }
   };
@@ -190,12 +224,24 @@ const LoLArena = () => {
     }
   };
 
+  // Fixed: Load augment data from correct API endpoint
   useEffect(() => {
-    fetch('/api/augments')
-      .then(res => res.json())
-      .then(data => {
-        if (data.success) setAugmentData(data.augments);
-      });
+    const loadAugmentData = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/augments`);
+        const data = await response.json();
+        if (data.success) {
+          setAugmentData(data.augments);
+          console.log('Loaded augment data:', data.augments.length, 'augments');
+        } else {
+          console.error('Failed to load augment data:', data.error);
+        }
+      } catch (err) {
+        console.error('Error fetching augment data:', err);
+      }
+    };
+
+    loadAugmentData();
   }, []);
 
   // Champion Avatar Component
@@ -268,38 +314,44 @@ const LoLArena = () => {
     );
   };
 
-  // Augment Component
+  // Fixed Augment Component
   const AugmentSlot = ({ augmentId }) => {
+    const [imageUrl, setImageUrl] = useState(null);
     const [imageError, setImageError] = useState(false);
 
-    if (!augmentId || augmentId === 0) return null;
-
+    // Find augment info from the loaded data
     const augmentInfo = augmentData.find(
       a => String(a.id) === String(augmentId) || a.apiName === augmentId
     );
 
-    // If augmentInfo is missing, show fallback and DO NOT render <img>
-    if (!augmentInfo) {
-      console.log('Missing augmentInfo for augmentId:', augmentId);
-      return (
-        <div className="augment-slot" title="Augment (unknown)">
-          <div className="augment-fallback">
-            <span>?</span>
-          </div>
-        </div>
-      );
-    }
+    React.useEffect(() => {
+      if (!augmentId || augmentId === 0) return;
 
-    const imageKey = augmentInfo.apiName;
-    const displayName = augmentInfo.name;
-    const imageUrl = `/api/images/augment/${imageKey}`;
+      const loadAugmentImage = async () => {
+        try {
+          const url = await getAugmentImageUrl(augmentId);
+          if (url) {
+            setImageUrl(url);
+          }
+        } catch (err) {
+          console.error('Failed to load augment image:', err);
+          setImageError(true);
+        }
+      };
+
+      loadAugmentImage();
+    }, [augmentId]);
+
+    if (!augmentId || augmentId === 0) return null;
+
+    const displayName = augmentInfo?.name || `Augment ${augmentId}`;
 
     return (
-      <div className="augment-slot" title={`Augment ${displayName}`}>
-        {!imageError ? (
+      <div className="augment-slot" title={displayName}>
+        {imageUrl && !imageError ? (
           <img
             src={imageUrl}
-            alt={`Augment ${displayName}`}
+            alt={displayName}
             className="augment-image"
             onError={() => setImageError(true)}
           />

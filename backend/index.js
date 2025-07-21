@@ -306,39 +306,136 @@ app.get('/api/augments', (req, res) => {
 
 // --- UPDATE YOUR EXISTING AUGMENT IMAGE ENDPOINT ---
 
-app.get('/api/images/augment/:augmentId', async (req, res) => {
+// Updated augment image endpoint with better ID matching
+app.get('/api/images/augment/:augmentId', (req, res) => {
   try {
     let { augmentId } = req.params;
     if (!augmentId) {
       return res.status(400).json({ success: false, error: 'No augment ID provided' });
     }
 
-    // If augmentId is numeric, map it to the string key using augmentDataCache
-    if (/^\d+$/.test(augmentId) && augmentDataCache) {
-      const found = augmentDataCache.find(a => String(a.id) === String(augmentId));
-      if (found && found.apiName) {
-        augmentId = found.apiName;
-      } else {
-        return res.status(404).json({ success: false, error: 'Augment not found for numeric ID' });
+    console.log(`🔍 Looking up augment image for ID: ${augmentId} (type: ${typeof augmentId})`);
+
+    if (!augmentDataCache || augmentDataCache.length === 0) {
+      return res.status(503).json({ 
+        success: false, 
+        error: 'Augment data not loaded yet, try again later.' 
+      });
+    }
+
+    let augmentInfo = null;
+    let cleanName = null;
+
+    // Try multiple ways to find the augment
+    console.log('🔍 Searching for augment in multiple ways...');
+    
+    // Method 1: Direct ID match (string)
+    augmentInfo = augmentDataCache.find(a => String(a.id) === String(augmentId));
+    if (augmentInfo) {
+      console.log('✅ Found by direct string ID match');
+    }
+    
+    // Method 2: Direct ID match (number)
+    if (!augmentInfo) {
+      augmentInfo = augmentDataCache.find(a => a.id === Number(augmentId));
+      if (augmentInfo) {
+        console.log('✅ Found by direct number ID match');
+      }
+    }
+    
+    // Method 3: API name match
+    if (!augmentInfo) {
+      augmentInfo = augmentDataCache.find(a => a.apiName === augmentId);
+      if (augmentInfo) {
+        console.log('✅ Found by API name match');
+      }
+    }
+    
+    // Method 4: Partial string match in ID
+    if (!augmentInfo) {
+      augmentInfo = augmentDataCache.find(a => String(a.id).includes(String(augmentId)));
+      if (augmentInfo) {
+        console.log('✅ Found by partial ID match');
+      }
+    }
+    
+    // Method 5: Try to map Riot API augment IDs to Community Dragon
+    // This might be needed if Riot uses different IDs than Community Dragon
+    if (!augmentInfo && /^\d+$/.test(augmentId)) {
+      // The augment might be in a different ID system
+      // Log available IDs for debugging
+      console.log('Available augment IDs (first 10):', augmentDataCache.slice(0, 10).map(a => ({ id: a.id, name: a.name })));
+      
+      // Sometimes Riot IDs need to be offset or mapped differently
+      // Try some common patterns:
+      const possibleMappings = [
+        Number(augmentId),
+        Number(augmentId) + 1,
+        Number(augmentId) - 1,
+        `TFT_Augment_${augmentId}`,
+        `Cherry_${augmentId}`
+      ];
+      
+      for (const mappedId of possibleMappings) {
+        augmentInfo = augmentDataCache.find(a => 
+          String(a.id) === String(mappedId) || 
+          a.apiName?.includes(String(mappedId))
+        );
+        if (augmentInfo) {
+          console.log(`✅ Found by mapped ID: ${augmentId} -> ${mappedId}`);
+          break;
+        }
       }
     }
 
-    const fileName = augmentId.toLowerCase().replace(/[\s\r\n]+/g, '') + '_large.png';
-    const imageUrl = `https://raw.communitydragon.org/15.14/game/assets/ux/cherry/augments/icons/${fileName}`;
-    console.log('Fetching augment image from:', imageUrl);
+    if (augmentInfo && augmentInfo.apiName) {
+      cleanName = augmentInfo.apiName.toLowerCase().replace(/[\s\r\n]+/g, '');
+    } else {
+      // Fallback: use the original ID as clean name
+      cleanName = String(augmentId).toLowerCase().replace(/[\s\r\n]+/g, '');
+      console.log('⚠️ No augment found, using fallback clean name:', cleanName);
+    }
 
-    const imageResponse = await axios.get(imageUrl, { responseType: 'stream' });
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Content-Type', 'image/png');
-    imageResponse.data.pipe(res);
+    // Create image URL
+    const imageUrl = `https://raw.communitydragon.org/latest/game/assets/ux/cherry/augments/icons/${cleanName}_large.png`;
+    const augmentName = augmentInfo?.name || `Augment ${augmentId}`;
+
+    console.log(`📷 Generated image URL: ${imageUrl}`);
+
+    res.json({
+      success: true,
+      augmentId: augmentId,
+      name: augmentName,
+      apiName: cleanName,
+      imageUrl: imageUrl,
+      debugInfo: {
+        originalId: augmentId,
+        foundInCache: !!augmentInfo,
+        cleanName: cleanName,
+        searchMethods: {
+          stringId: !!augmentDataCache.find(a => String(a.id) === String(augmentId)),
+          numberId: !!augmentDataCache.find(a => a.id === Number(augmentId)),
+          apiName: !!augmentDataCache.find(a => a.apiName === augmentId)
+        },
+        totalAugmentsInCache: augmentDataCache.length
+      }
+    });
+    
   } catch (error) {
-    console.error('❌ Augment image proxy failed:', error.message);
+    console.error('❌ Augment image lookup failed:', error.message);
     res.status(500).json({
       success: false,
-      error: 'Failed to proxy augment image'
+      error: 'Failed to get augment image',
+      debugInfo: {
+        originalId: req.params.augmentId,
+        errorMessage: error.message,
+        hasAugmentCache: !!augmentDataCache,
+        cacheSize: augmentDataCache?.length || 0
+      }
     });
   }
 });
+
 
 
 
