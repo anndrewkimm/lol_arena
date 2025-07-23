@@ -177,10 +177,10 @@ async function loadStaticData() {
         for (const augment of augments) { // This is where "augments is not iterable" happens
             // New Log: Check for problematic IDs as they are processed
             if (augment.id === 238 || augment.id === 206 || augment.id === 125) {
-                console.log(`  Processing problematic augment ID: ${augment.id}, name: "${augment.name}", apiName: "${augment.apiName}"`);
-                console.log(`  Value of augment.id !== undefined: ${augment.id !== undefined}`);
-                console.log(`  Value of augment.name: ${augment.name}`);
-                console.log(`  Value of augment.apiName: ${augment.apiName}`);
+                console.log(`   Processing problematic augment ID: ${augment.id}, name: "${augment.name}", apiName: "${augment.apiName}"`);
+                console.log(`   Value of augment.id !== undefined: ${augment.id !== undefined}`);
+                console.log(`   Value of augment.name: ${augment.name}`);
+                console.log(`   Value of augment.apiName: ${augment.apiName}`);
             }
 
             if (augment.name) {
@@ -189,7 +189,7 @@ async function loadStaticData() {
                     augmentNamesMap[String(augment.id)] = augment.name;
                     // New Log: Confirm what was just added for problematic IDs
                     if (augment.id === 238 || augment.id === 206 || augment.id === 125) {
-                        console.log(`  Augment ${augment.id} mapped as String: '${augmentNamesMap[String(augment.id)]}'`);
+                        console.log(`   Augment ${augment.id} mapped as String: '${augmentNamesMap[String(augment.id)]}'`);
                     }
                 }
                 // Also add the apiName as a string key if it exists, as a fallback/alternative lookup
@@ -197,7 +197,7 @@ async function loadStaticData() {
                     augmentNamesMap[augment.apiName] = augment.name;
                     // New Log: Confirm what was just added for problematic IDs
                     if (augment.id === 238 || augment.id === 206 || augment.id === 125) {
-                        console.log(`  Augment ${augment.apiName} mapped directly: '${augmentNamesMap[augment.apiName]}'`);
+                        console.log(`   Augment ${augment.apiName} mapped directly: '${augmentNamesMap[augment.apiName]}'`);
                     }
                 }
             }
@@ -727,7 +727,7 @@ app.get('/api/arena/riot-id/:gameName/:tagLine/csv', async (req, res) => {
 
         const csvContent = [csvHeaders.join(','), ...csvRows].join('\n');
 
-        console.log(`Generated CSV with ${validMatches.length} matches for ${gameName}#${tagLine}`);
+        console.log(`Generated CSV with ${validMatches.length} matches`);
 
         res.setHeader('Content-Type', 'text/csv');
         res.setHeader('Content-Disposition', `attachment; filename="${sanitizedFilename}"`);
@@ -744,162 +744,373 @@ app.get('/api/arena/riot-id/:gameName/:tagLine/csv', async (req, res) => {
     }
 });
 
-/**
- * OLD ENDPOINT: Get CSV by summoner name (keeping for backwards compatibility)
- * Consider deprecating this as Riot is moving to Riot ID for lookup.
- */
-app.get('/api/arena/summoner/:summonerName/csv', async (req, res) => {
-    try {
-        const { summonerName } = req.params;
-        const region = req.query.region || 'na1';
-        const count = Math.min(parseInt(req.query.count) || 50, 100);
-        const filename = req.query.filename || `arena_matches_${summonerName}_${Date.now()}.csv`;
+// Add this new endpoint to your existing code
+// This endpoint collects comprehensive match data for ML model training
 
-        console.log(`Looking up Summoner: ${summonerName} in region: ${region}`);
+/**
+ * NEW ML ENDPOINT: Get comprehensive Arena match data for ML training
+ * Fetches ALL players' data from each match, including team compositions and outcomes
+ * @route GET /api/arena/ml-data/:gameName/:tagLine/csv
+ * @param {string} req.params.gameName - The game name part of the Riot ID.
+ * @param {string} req.params.tagLine - The tag line part of the Riot ID.
+ * @param {string} [req.query.accountRegion='americas'] - The regional routing for Riot Account API.
+ * @param {number} [req.query.count=50] - Number of matches to fetch (max 100).
+ * @param {string} [req.query.filename] - Optional filename for the CSV.
+ */
+app.get('/api/arena/ml-data/:gameName/:tagLine/csv', async (req, res) => {
+    try {
+        const { gameName, tagLine } = req.params;
+        const accountRegion = req.query.accountRegion || 'americas';
+        const count = Math.min(parseInt(req.query.count) || 50, 100);
+        const filename = req.query.filename || `arena_ml_data_${gameName}_${tagLine}_${Date.now()}.csv`;
+
+        console.log(`Looking up Riot ID: ${gameName}#${tagLine} for ML data collection`);
 
         let puuid;
         try {
-            puuid = await getPuuidFromSummoner(summonerName, region);
-            console.log(`Found PUUID for ${summonerName}: ${puuid.substring(0, 8)}...`);
+            // Ensure getPuuidFromRiotId is defined and accessible
+            puuid = await getPuuidFromRiotId(gameName, tagLine, accountRegion);
+            console.log(`Found PUUID for ${gameName}#${tagLine}: ${puuid.substring(0, 8)}...`);
         } catch (error) {
             if (error.response?.status === 404) {
                 return res.status(404).json({
                     success: false,
-                    error: `Summoner "${summonerName}" not found in region "${region}"`
+                    error: `Riot ID "${gameName}#${tagLine}" not found in region "${accountRegion}"`
                 });
             }
+            console.error(`Error fetching PUUID for ${gameName}#${tagLine}:`, error.message);
             throw error;
         }
 
+        // Ensure 'path' module is imported if not already. For example: `const path = require('path');`
         const sanitizedFilename = path.basename(filename).replace(/[^a-zA-Z0-9._-]/g, '_');
-
-        const matchRegion = 'americas';
+        const matchRegion = 'americas'; // Assuming 'americas' for match data
+        // Ensure ARENA_QUEUE_ID is defined and accessible
         const matchUrl = `https://${matchRegion}.api.riotgames.com/lol/match/v5/matches/by-puuid/${puuid}/ids?queue=${ARENA_QUEUE_ID}&start=0&count=${count}`;
 
-        console.log(`Fetching Arena matches for ${summonerName}...`);
+        console.log(`Fetching Arena matches for ML training data...`);
+        // Ensure makeRiotApiCall is defined and accessible
         const matchResponse = await makeRiotApiCall(matchUrl);
         const matchIds = matchResponse.data;
 
         if (matchIds.length === 0) {
             return res.status(404).json({
                 success: false,
-                error: `No Arena matches found for ${summonerName}`
+                error: `No Arena matches found for ${gameName}#${tagLine}`
             });
         }
 
-        console.log(`Found ${matchIds.length} Arena matches for ${summonerName}, fetching details...`);
+        console.log(`Found ${matchIds.length} Arena matches, processing for ML data...`);
+
+        // Store all match records (multiple rows per match - one for each player)
+        const allMatchRecords = [];
 
         const matchPromises = matchIds.map(async (matchId, index) => {
-            await delay(index * 120);
+            // Ensure delay function is defined and accessible (e.g., `const delay = ms => new Promise(res => setTimeout(res, ms));`)
+            await delay(index * 120); // Add a small delay to avoid hitting rate limits too hard
 
             try {
                 const matchDetailUrl = `https://${matchRegion}.api.riotgames.com/lol/match/v5/matches/${matchId}`;
                 const matchDetailResponse = await makeRiotApiCall(matchDetailUrl);
                 const match = matchDetailResponse.data;
 
-                if (match.info.queueId !== ARENA_QUEUE_ID) return null;
+                // Only process Arena matches
+                if (match.info.queueId !== ARENA_QUEUE_ID) {
+                    console.log(`Skipping non-Arena match: ${matchId}`);
+                    return [];
+                }
 
-                const playerData = match.info.participants.find(p => p.puuid === puuid);
-                if (!playerData) return null;
+                // Extract match-level information
+                const matchInfo = {
+                    matchId: match.metadata.matchId,
+                    gameCreation: match.info.gameCreation,
+                    gameDuration: match.info.gameDuration,
+                    gameMode: match.info.gameMode,
+                    queueId: match.info.queueId
+                };
 
-                const itemNames = [
-                    playerData.item0, playerData.item1, playerData.item2,
-                    playerData.item3, playerData.item4, playerData.item5, playerData.item6
-                ]
-                .filter(item => item !== 0)
-                .map(item_id => itemNamesMap[String(item_id)] || `Unknown Item (${item_id})`);
+                // Process each participant
+                const participants = match.info.participants;
+                const matchRecords = [];
 
-                const rawAugmentIds = [
-                    playerData.playerAugment1,
-                    playerData.playerAugment2,
-                    playerData.playerAugment3,
-                    playerData.playerAugment4
-                ].filter(augment => augment && augment !== 0);
+                // In Arena, teams are typically 2v2v2v2 (8 players total)
+                // We need to determine team assignments and placement
+                participants.forEach((player, playerIndex) => {
+                    // Map item IDs to names
+                    const itemIds = [
+                        player.item0, player.item1, player.item2,
+                        player.item3, player.item4, player.item5, player.item6
+                    ].filter(item => item !== 0);
 
-                const augmentNames = rawAugmentIds
-                    .map(augment_id => {
-                        console.log(`Processing augment_id: ${augment_id} (Type: ${typeof augment_id}) in Match ${matchId} (Summoner CSV)`);
+                    // Ensure itemNamesMap is defined and accessible (e.g., loaded from a DDragon API)
+                    const itemNames = itemIds.map(item_id =>
+                        itemNamesMap[String(item_id)] || `Unknown_Item_${item_id}`
+                    );
+
+                    // Map augment IDs to names
+                    const augmentIds = [
+                        player.playerAugment1,
+                        player.playerAugment2,
+                        player.playerAugment3,
+                        player.playerAugment4
+                    ].filter(augment => augment && augment !== 0);
+
+                    // Ensure augmentNamesMap is defined and accessible (e.g., loaded from a DDragon API)
+                    const augmentNames = augmentIds.map(augment_id => {
                         let name = augmentNamesMap[String(augment_id)];
                         if (!name) {
-                            name = augmentNamesMap[augment_id];
+                            name = augmentNamesMap[augment_id]; // Try direct access if string conversion fails
                         }
-                        return name || `Unknown Augment (${augment_id})`;
+                        return name || `Unknown_Augment_${augment_id}`;
                     });
 
-                return {
-                    matchId,
-                    gameCreation: match.info.gameCreation,
-                    gameduration: match.info.gameDuration,
-                    championName: playerData.championName,
-                    items: itemNames,
-                    augments: augmentNames
-                };
+                    // Create a comprehensive record for this player
+                    const playerRecord = {
+                        // Match identifiers
+                        matchId: matchInfo.matchId,
+                        gameCreation: new Date(matchInfo.gameCreation).toISOString(),
+                        gameDurationMinutes: Math.round(matchInfo.gameDuration / 60),
+
+                        // Player identifiers (Removed: puuid, teamId)
+                        playerIndex: playerIndex + 1, // 1-based index for easier reading
+
+                        // Champion and build
+                        championName: player.championName,
+                        championId: player.championId,
+
+                        // Performance metrics
+                        kills: player.kills || 0,
+                        deaths: player.deaths || 0,
+                        assists: player.assists || 0,
+                        totalDamageDealt: player.totalDamageDealt || 0,
+                        totalDamageDealtToChampions: player.totalDamageDealtToChampions || 0,
+                        totalDamageTaken: player.totalDamageTaken || 0,
+                        goldEarned: player.goldEarned || 0,
+
+                        // Arena-specific metrics (Removed: playerScore0, playerScore1, playerScore2)
+                        placement: player.placement || 0, // Final placement in the match
+
+                        // Items (up to 7 items, padded with empty strings for consistency)
+                        item1: itemNames[0] || '',
+                        item2: itemNames[1] || '',
+                        item3: itemNames[2] || '',
+                        item4: itemNames[3] || '',
+                        item5: itemNames[4] || '',
+                        item6: itemNames[5] || '',
+                        // item7: itemNames[6] || '', // Removed: item7
+
+                        // Augments (up to 4 augments, padded with empty strings for consistency)
+                        augment1: augmentNames[0] || '',
+                        augment2: augmentNames[1] || '',
+                        augment3: augmentNames[2] || '',
+                        augment4: augmentNames[3] || '',
+
+                        // Target variable for ML (1 if this player/team won, 0 otherwise)
+                        // In Arena, placement 1 typically means winner
+                        isWinner: (player.placement === 1) ? 1 : 0,
+
+                        // Additional features that might be useful (Removed: totalMinionsKilled, visionScore)
+                        level: player.champLevel || 0,
+                    };
+
+                    matchRecords.push(playerRecord);
+                });
+
+                return matchRecords;
+
             } catch (error) {
-                console.error(`Failed to fetch details for match ${matchId}:`, error.response?.status);
-                return null;
+                console.error(`Failed to fetch ML data for match ${matchId}:`, error.response?.status || error.message);
+                return []; // Return empty array for failed matches
             }
         });
 
-        const matches = await Promise.all(matchPromises);
-        const validMatches = matches.filter(m => m !== null);
+        const allMatchResults = await Promise.all(matchPromises);
 
-        console.log(`Successfully processed ${validMatches.length}/${matchIds.length} matches for ${summonerName}`);
+        // Flatten the array of arrays into a single list of records
+        allMatchResults.forEach(matchRecords => {
+            allMatchRecords.push(...matchRecords);
+        });
 
-        const csvHeaders = ['matchId', 'gameCreation', 'gameDuration', 'championName', 'items', 'augments'];
-        const csvRows = validMatches.map(match => {
-            return [
-                match.matchId,
-                new Date(match.gameCreation).toISOString(),
-                Math.round(match.gameDuration / 60),
-                match.championName,
-                `"${match.items.join(';')}"`,
-                `"${match.augments.join(';')}"`
-            ].join(',');
+        console.log(`Successfully processed ${allMatchRecords.length} player records from ${matchIds.length} matches`);
+
+        if (allMatchRecords.length === 0) {
+            return res.status(404).json({
+                success: false,
+                error: 'No valid match data found for ML training after filtering'
+            });
+        }
+
+        // Define CSV headers explicitly to control order and ensure all fields are present
+        const csvHeaders = [
+            'matchId', 'gameCreation', 'gameDurationMinutes', 'playerIndex',
+            'championName', 'championId', 'kills', 'deaths', 'assists',
+            'totalDamageDealt', 'totalDamageDealtToChampions', 'totalDamageTaken', 'goldEarned',
+            'placement',
+            'item1', 'item2', 'item3', 'item4', 'item5', 'item6',
+            'augment1', 'augment2', 'augment3', 'augment4',
+            'isWinner', 'level'
+            // Removed: 'puuid', 'teamId', 'playerScore0', 'playerScore1', 'playerScore2', 'item7', 'totalMinionsKilled', 'visionScore'
+        ];
+
+        // Convert records to CSV rows
+        const csvRows = allMatchRecords.map(record => {
+            return csvHeaders.map(header => {
+                const value = record[header];
+                // Handle null/undefined values, convert to empty string for CSV
+                if (value === null || typeof value === 'undefined') {
+                    return '';
+                }
+                // Escape values that contain commas or quotes for proper CSV formatting
+                if (typeof value === 'string' && (value.includes(',') || value.includes('"') || value.includes('\n'))) {
+                    return `"${value.replace(/"/g, '""')}"`; // Double quotes to escape existing quotes
+                }
+                return value;
+            }).join(',');
         });
 
         const csvContent = [csvHeaders.join(','), ...csvRows].join('\n');
 
-        console.log(`Generated CSV with ${validMatches.length} matches for ${summonerName}`);
+        console.log(`Generated ML training CSV with ${allMatchRecords.length} player records`);
 
+        // Set appropriate headers for CSV download
         res.setHeader('Content-Type', 'text/csv');
         res.setHeader('Content-Disposition', `attachment; filename="${sanitizedFilename}"`);
-        res.setHeader('Content-Length', Buffer.byteLength(csvContent));
+        res.setHeader('Content-Length', Buffer.byteLength(csvContent)); // Important for proper download progress
 
         res.send(csvContent);
 
     } catch (error) {
-        console.error(`Error in /api/arena/summoner/${req.params.summonerName}/csv:`, error.response?.data || error.message);
+        console.error(`Error in ML data collection endpoint:`, error.response?.data || error.message);
         res.status(error.response?.status || 500).json({
             success: false,
-            error: error.response?.data?.message || 'Failed to export Arena matches to CSV'
+            error: error.response?.data?.message || 'Failed to collect ML training data due to an internal server error.'
         });
     }
 });
 
+// Also add this helper endpoint to get team composition analysis
+/**
+ * HELPER ENDPOINT: Analyze team compositions from collected data
+ * This can help you understand the data structure before building your ML model
+ * @route GET /api/arena/analyze/:gameName/:tagLine
+ * @param {string} req.params.gameName - The game name part of the Riot ID.
+ * @param {string} req.params.tagLine - The tag line part of the Riot ID.
+ * @param {string} [req.query.accountRegion='americas'] - The regional routing for Riot Account API.
+ * @param {number} [req.query.count=10] - Number of matches to sample for analysis (max 20).
+ */
+app.get('/api/arena/analyze/:gameName/:tagLine', async (req, res) => {
+    try {
+        const { gameName, tagLine } = req.params;
+        const accountRegion = req.query.accountRegion || 'americas';
+        const sampleSize = Math.min(parseInt(req.query.count) || 10, 20); // Smaller sample for analysis
 
-// --- Server Startup ---
-(async () => {
-    await loadStaticData(); // Load data before starting the server
-    console.log(`Debug Check: augmentNamesMap["238"] is:`, augmentNamesMap["238"]);
-    console.log(`Debug Check: augmentNamesMap["206"] is:`, augmentNamesMap["206"]);
-    console.log(`Debug Check: augmentNamesMap["125"] is:`, augmentNamesMap["125"]);
-    console.log(`Debug Check: augmentNamesMap["TransmutePrismatic"] is:`, augmentNamesMap["TransmutePrismatic"]);
-    console.log(`Debug Check: augmentNamesMap["ChainLightning"] is:`, augmentNamesMap["ChainLightning"]);
-    app.listen(port, () => {
-        console.log(`LoL Arena Data Collector running on http://localhost:${port}`);
-        console.log('Endpoints:');
-        console.log(`GET /api/arena/matches/:puuid - get Arena matches (JSON)`);
-        console.log(`GET /api/arena/matches/:puuid/csv - export Arena matches to CSV`);
-        console.log(`GET /api/arena/riot-id/:gameName/:tagLine/csv - export Arena matches by Riot ID (RECOMMENDED!)`);
-        console.log(`GET /api/arena/summoner/:summonerName/csv - export Arena matches by summoner name (LEGACY)`);
-        console.log('');
-        console.log('Examples:');
-        console.log('   http://localhost:3001/api/arena/riot-id/Faker/T1');
-        console.log('   http://localhost:3001/api/arena/riot-id/anndrewkimm/9165/csv');
-        console.log('   http://localhost:3001/api/test/summoner/RiotSchmick (test API key)');
-        console.log('');
-        console.log('Rate limiting: 50 requests per 2 minutes per IP');
-        console.log('API calls have 120ms delays to respect Riot rate limits');
-        console.log(`Current Data Dragon Version: ${latestDDragonVersion}`);
-    });
-})();
+        let puuid;
+        try {
+            puuid = await getPuuidFromRiotId(gameName, tagLine, accountRegion);
+        } catch (error) {
+            if (error.response?.status === 404) {
+                return res.status(404).json({
+                    success: false,
+                    error: `Riot ID "${gameName}#${tagLine}" not found`
+                });
+            }
+            console.error(`Error fetching PUUID for analysis of ${gameName}#${tagLine}:`, error.message);
+            throw error;
+        }
+
+        const matchRegion = 'americas';
+        const matchUrl = `https://${matchRegion}.api.riotgames.com/lol/match/v5/matches/by-puuid/${puuid}/ids?queue=${ARENA_QUEUE_ID}&start=0&count=${sampleSize}`;
+
+        const matchResponse = await makeRiotApiCall(matchUrl);
+        // Just analyze first 3 matches for a quick overview
+        const matchIds = matchResponse.data.slice(0, Math.min(3, matchResponse.data.length));
+
+        const analysis = {
+            totalMatchesSampled: matchIds.length,
+            playerCountsPerMatch: [],
+            teamStructuresPerMatch: [],
+            placementDistributionsPerMatch: [],
+            commonChampions: {},
+            commonAugments: {},
+            averageGameDurationMinutes: 0
+        };
+
+        let totalGameDuration = 0;
+
+        for (const matchId of matchIds) {
+            try {
+                const matchDetailUrl = `https://${matchRegion}.api.riotgames.com/lol/match/v5/matches/${matchId}`;
+                const matchDetailResponse = await makeRiotApiCall(matchDetailUrl);
+                const match = matchDetailResponse.data;
+
+                if (match.info.queueId !== ARENA_QUEUE_ID) {
+                    console.log(`Skipping non-Arena match for analysis: ${matchId}`);
+                    continue; // Skip to the next match
+                }
+
+                const participants = match.info.participants;
+                analysis.playerCountsPerMatch.push(participants.length);
+                totalGameDuration += match.info.gameDuration;
+
+                // Analyze team structure
+                const teams = {};
+                const placements = [];
+
+                participants.forEach(player => {
+                    // Track team compositions
+                    if (!teams[player.teamId]) {
+                        teams[player.teamId] = [];
+                    }
+                    teams[player.teamId].push(player.championName);
+
+                    // Track placements
+                    if (player.placement) {
+                        placements.push(player.placement);
+                    }
+
+                    // Count champions
+                    analysis.commonChampions[player.championName] = (analysis.commonChampions[player.championName] || 0) + 1;
+
+                    // Count augments
+                    [player.playerAugment1, player.playerAugment2, player.playerAugment3, player.playerAugment4]
+                        .filter(aug => aug && aug !== 0)
+                        .forEach(augId => {
+                            const augName = augmentNamesMap[String(augId)] || augmentNamesMap[augId] || `Unknown_Augment_${augId}`;
+                            analysis.commonAugments[augName] = (analysis.commonAugments[augName] || 0) + 1;
+                        });
+                });
+
+                analysis.teamStructuresPerMatch.push(teams);
+                analysis.placementDistributionsPerMatch.push(placements);
+            } catch (error) {
+                console.error(`Failed to analyze match ${matchId}:`, error.response?.status || error.message);
+            }
+        }
+
+        analysis.averageGameDurationMinutes = matchIds.length > 0 ? Math.round(totalGameDuration / matchIds.length / 60) : 0;
+
+        res.json({
+            success: true,
+            analysis,
+            recommendations: {
+                dataStructure: "Each match typically contains 8 players (4 teams of 2). The CSV output provides one row per player per match.",
+                targetVariable: "For predicting winners, use the 'isWinner' column (1 for winner, 0 otherwise). For predicting placement, use the 'placement' column.",
+                features: "Consider champion picks, augment combinations, and aggregated team-level statistics (e.g., total team damage, combined gold).",
+                preprocessing: "You may want to pivot the CSV data to create team-level features or match-level features (e.g., champion pairings, augment synergies). Categorical features like champion names and augment names will need to be one-hot encoded or embedded."
+            }
+        });
+
+    } catch (error) {
+        console.error('Error in analysis endpoint:', error.response?.data || error.message);
+        res.status(error.response?.status || 500).json({
+            success: false,
+            error: error.response?.data?.message || 'Failed to analyze match data due to an internal server error.'
+        });
+    }
+});
+
+// --- Server Start ---
+app.listen(port, async () => {
+    console.log(`Server running on port ${port}`);
+    await loadStaticData(); // Load static data when the server starts
+});
