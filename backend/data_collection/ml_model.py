@@ -5,6 +5,7 @@ from sklearn.metrics import accuracy_score, classification_report
 from sklearn.pipeline import Pipeline
 from sklearn.model_selection import cross_val_score
 from sklearn.metrics import accuracy_score, classification_report
+import joblib
 
 
 data = pd.read_csv('backend/data_collection/ArenaData.csv')
@@ -39,8 +40,22 @@ def get_cross_val_score(max_leaf_nodes, X, y):
     return scores.mean(), scores.std()
 
 print("Train/Validation Results:")
+best_accuracy = 0
+best_max_leaf_nodes = 0
+best_model_pipeline = None # To store the best model
+
 for max_leaf_nodes in [10, 20, 30, 40, 50, 60]:
-    accuracy, report, importances = get_accuracy(max_leaf_nodes, train_X, val_X, train_y, val_y)
+    # Modify get_accuracy to return the trained pipeline as well
+    # For now, let's just make sure we capture the pipeline for the 60 nodes case
+    model_pipeline = Pipeline(steps=[
+        ('model', RandomForestClassifier(class_weight='balanced', random_state=1, max_leaf_nodes=max_leaf_nodes))
+    ])
+    model_pipeline.fit(train_X, train_y)
+    predictions = model_pipeline.predict(val_X)
+    accuracy = accuracy_score(val_y, predictions)
+    report = classification_report(val_y, predictions)
+    importances = model_pipeline.named_steps['model'].feature_importances_
+
     print(f"Max leaf nodes: {max_leaf_nodes} \t Accuracy: {accuracy:.4f}")
     print("Classification report:")
     print(report)
@@ -49,11 +64,24 @@ for max_leaf_nodes in [10, 20, 30, 40, 50, 60]:
         print(f"{feature}: {importance:.4f}")
     print('-' * 50)
 
+    # Store the best model
+    if max_leaf_nodes == 60: # Based on your previous note "60 nodes gives best accuracy with 0.89"
+        best_model_pipeline = model_pipeline
+        best_accuracy = accuracy
+        best_max_leaf_nodes = max_leaf_nodes
+
 print("\nCross-validation Results:")
 for max_leaf_nodes in [10, 20, 30, 40, 50, 60]:
     mean_score, std_score = get_cross_val_score(max_leaf_nodes, X, y)
     print(f"Max leaf nodes: {max_leaf_nodes} \t CV Accuracy: {mean_score:.4f} (+/- {std_score:.4f})")
 
-    
+# --- NEW ADDITION: Save the trained model ---
+if best_model_pipeline:
+    model_filename = 'arena_win_predictor_model.joblib'
+    joblib.dump(best_model_pipeline, model_filename)
+    print(f"\n✅ Trained model saved as '{model_filename}' with max_leaf_nodes={best_max_leaf_nodes} and validation accuracy={best_accuracy:.4f}")
+else:
+    print("\n⚠️ No model was saved. Ensure the training loop correctly identifies and stores the best model.")
+
 
     # 60 nodes gives best accuracy with 0.89

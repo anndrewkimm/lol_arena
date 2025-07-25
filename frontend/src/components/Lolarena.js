@@ -11,21 +11,22 @@ const LoLArena = () => {
   const [error, setError] = useState('');
   const [imageCache, setImageCache] = useState({}); // Cache for image URLs
   const [augmentData, setAugmentData] = useState([]);
+  // Prediction states
+  const [predictionResult, setPredictionResult] = useState(null); 
+  const [predictionLoading, setPredictionLoading] = useState(false);
+  const [predictionError, setPredictionError] = useState('');
 
   const API_BASE = 'http://localhost:3001';
 
-  // Get champion image URL
+  // Get champion image URL - uses cache
   const getChampionImageUrl = async (championName, size = 'square') => {
     const cacheKey = `champion_${championName}_${size}`;
-    
     if (imageCache[cacheKey]) {
       return imageCache[cacheKey];
     }
-
     try {
       const response = await fetch(`${API_BASE}/api/images/champion/${championName}?size=${size}`);
       const data = await response.json();
-      
       if (data.success) {
         setImageCache(prev => ({ ...prev, [cacheKey]: data.imageUrl }));
         return data.imageUrl;
@@ -33,22 +34,19 @@ const LoLArena = () => {
     } catch (err) {
       console.error('Failed to get champion image:', err);
     }
-    
     return null;
   };
 
-  // Get item image URL
+  // Get item image URL - uses cache
   const getItemImageUrl = async (itemId) => {
+    if (!itemId || itemId === 0) return null;
     const cacheKey = `item_${itemId}`;
-    
     if (imageCache[cacheKey]) {
       return imageCache[cacheKey];
     }
-
     try {
       const response = await fetch(`${API_BASE}/api/images/item/${itemId}`);
       const data = await response.json();
-      
       if (data.success) {
         setImageCache(prev => ({ ...prev, [cacheKey]: data.imageUrl }));
         return data.imageUrl;
@@ -56,34 +54,46 @@ const LoLArena = () => {
     } catch (err) {
       console.error('Failed to get item image:', err);
     }
-    
     return null;
   };
 
-  // Get augment image URL
+  // Get augment image URL - uses cache
   const getAugmentImageUrl = async (augmentId) => {
+    if (!augmentId) return null;
     const cacheKey = `augment_${augmentId}`;
-    
     if (imageCache[cacheKey]) {
-      return imageCache[cacheKey];
+        return imageCache[cacheKey];
     }
-
     try {
-      const response = await fetch(`${API_BASE}/api/images/augment/${augmentId}`);
-      const data = await response.json();
-      
-      if (data.success) {
-        setImageCache(prev => ({ ...prev, [cacheKey]: data.imageUrl }));
-        return data.imageUrl;
-      }
+        const response = await fetch(`${API_BASE}/api/images/augment/${augmentId}`);
+        const data = await response.json();
+        if (data.success) {
+            setImageCache(prev => ({ ...prev, [cacheKey]: data.imageUrl }));
+            return data.imageUrl;
+        }
     } catch (err) {
-      console.error('Failed to get augment image:', err);
+        console.error('Failed to get augment image:', err);
     }
-    
     return null;
   };
 
-  // Preload images for better UX
+  // Pre-fetch augment data on component mount
+  useEffect(() => {
+    const fetchAugments = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/augments`);
+        const data = await response.json();
+        if (data.success) {
+          setAugmentData(data.augments);
+        }
+      } catch (err) {
+        console.error('Failed to fetch augment data:', err);
+      }
+    };
+    fetchAugments();
+  }, []);
+
+  // Preload images for better UX using batch fetching from backend
   const preloadMatchImages = async (matches) => {
     const championNames = matches.map(match => match.player.championName);
     const itemIds = matches.flatMap(match => match.player.items || []).filter(id => id && id !== 0);
@@ -97,7 +107,6 @@ const LoLArena = () => {
         body: JSON.stringify({ championNames: [...new Set(championNames)] })
       });
       const champData = await champResponse.json();
-      
       if (champData.success) {
         const newCache = {};
         champData.images.forEach(img => {
@@ -118,7 +127,6 @@ const LoLArena = () => {
           body: JSON.stringify({ itemIds: [...new Set(itemIds)] })
         });
         const itemData = await itemResponse.json();
-        
         if (itemData.success) {
           const newCache = {};
           itemData.images.forEach(img => {
@@ -131,7 +139,7 @@ const LoLArena = () => {
       }
     }
 
-    // Preload augment images
+    // Preload augment images (individual calls as no batch endpoint exists yet)
     if (augmentIds.length > 0) {
       const uniqueAugmentIds = [...new Set(augmentIds)];
       for (const augmentId of uniqueAugmentIds) {
@@ -144,7 +152,36 @@ const LoLArena = () => {
     }
   };
 
-  const searchPlayer = async (e) => {
+  // Function to call the prediction service
+  const predictArenaWin = async (playerStats) => {
+    setPredictionLoading(true);
+    setPredictionError('');
+    setPredictionResult(null); // Clear previous prediction
+
+    try {
+      const response = await fetch(`${API_BASE}/api/predict-arena-win`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(playerStats),
+      });
+      const data = await response.json();
+
+      if (data.success) {
+        setPredictionResult(data);
+      } else {
+        setPredictionError(data.error || 'Failed to get prediction.');
+      }
+    } catch (err) {
+      console.error('Error calling prediction API:', err);
+      setPredictionError('Could not connect to prediction service.');
+    } finally {
+      setPredictionLoading(false);
+    }
+  };
+
+  const handleSearch = async (e) => {
     e.preventDefault();
     
     if (!gameName.trim() || !tagLine.trim()) {
@@ -156,34 +193,54 @@ const LoLArena = () => {
     setError('');
     setPlayer(null);
     setMatches([]);
+    setPredictionResult(null); // Clear prediction on new search
+    setPredictionError('');
 
     try {
-      // Step 1: Get player info
+      // Step 1: Get PUUID
       const playerResponse = await fetch(`${API_BASE}/api/player/${encodeURIComponent(gameName.trim())}/${encodeURIComponent(tagLine.trim())}`);
       const playerData = await playerResponse.json();
 
       if (!playerData.success) {
-        throw new Error(playerData.error);
+        throw new Error(playerData.error || 'Player not found.');
       }
-
       setPlayer(playerData.player);
 
-      // Step 2: Get match history
-      const matchResponse = await fetch(`${API_BASE}/api/matches/${playerData.player.puuid}?count=10`);
-      const matchData = await matchResponse.json();
+      // Step 2: Get Match History
+      const matchesResponse = await fetch(`${API_BASE}/api/matches/${playerData.player.puuid}?count=10`);
+      const matchesData = await matchesResponse.json();
 
-      if (!matchData.success) {
-        throw new Error(matchData.error);
+      if (!matchesData.success) {
+        throw new Error(matchesData.error || 'Failed to fetch match history.');
       }
 
-      setMatches(matchData.matches);
+      // Filter for Arena matches (queueId 1700)
+      const arenaMatches = matchesData.matches.filter(match => match.queueId === 1700);
+      setMatches(arenaMatches);
 
-      // Step 3: Preload images
-      await preloadMatchImages(matchData.matches);
+      // Step 3: Preload images for the fetched matches
+      await preloadMatchImages(arenaMatches);
+
+      // Step 4: After fetching and filtering matches, use the latest Arena match for prediction
+      if (arenaMatches.length > 0) {
+        const latestArenaMatchPlayerStats = arenaMatches[0].player; // Assuming latest match is first
+        const statsForPrediction = {
+          championId: latestArenaMatchPlayerStats.championId,
+          kills: latestArenaMatchPlayerStats.kills,
+          deaths: latestArenaMatchPlayerStats.deaths,
+          assists: latestArenaMatchPlayerStats.assists,
+          totalDamageDealt: latestArenaMatchPlayerStats.totalDamageDealt,
+          totalDamageTaken: latestArenaMatchPlayerStats.totalDamageTaken,
+          goldEarned: latestArenaMatchPlayerStats.goldEarned,
+        };
+        predictArenaWin(statsForPrediction);
+      } else {
+        setPredictionError('No Arena matches found to generate a prediction.');
+      }
 
     } catch (err) {
-      setError(err.message || 'Failed to fetch player data');
       console.error('Search error:', err);
+      setError(err.message || 'An unknown error occurred.');
     } finally {
       setLoading(false);
     }
@@ -213,48 +270,36 @@ const LoLArena = () => {
       400: 'Normal Draft',
       430: 'Normal Blind',
       700: 'Clash',
-      1700: 'Arena' // Arena queue ID
+      1700: 'Arena' 
     };
     return queues[queueId] || `Queue ${queueId}`;
   };
 
-  const handleKeyPress = (e) => {
-    if (e.key === 'Enter') {
-      searchPlayer(e);
+  const getPlacementText = (placement) => {
+    switch (placement) {
+        case 1: return '1st Place';
+        case 2: return '2nd Place';
+        case 3: return '3rd Place';
+        case 4: return '4th Place';
+        case 5: return '5th Place';
+        case 6: return '6th Place';
+        case 7: return '7th Place';
+        case 8: return '8th Place';
+        default: return 'N/A';
     }
   };
 
-  // Fixed: Load augment data from correct API endpoint
-  useEffect(() => {
-    const loadAugmentData = async () => {
-      try {
-        const response = await fetch(`${API_BASE}/api/augments`);
-        const data = await response.json();
-        if (data.success) {
-          setAugmentData(data.augments);
-          console.log('Loaded augment data:', data.augments.length, 'augments');
-        } else {
-          console.error('Failed to load augment data:', data.error);
-        }
-      } catch (err) {
-        console.error('Error fetching augment data:', err);
-      }
-    };
+  const getOutcomeClass = (placement) => {
+    return placement >= 1 && placement <= 4 ? 'win' : 'loss';
+  };
 
-    loadAugmentData();
-  }, []);
-
-  // Champion Avatar Component
+  // Champion Avatar Component - Uses preloaded cache
   const ChampionAvatar = ({ championName, champLevel, size = 48 }) => {
-    const [imageUrl, setImageUrl] = useState(null);
-    const [imageError, setImageError] = useState(false);
+    const imageUrl = imageCache[`champion_${championName}_square`];
+    const [imageError, setImageError] = useState(false); // Local state for individual image errors
 
-    React.useEffect(() => {
-      const loadImage = async () => {
-        const url = await getChampionImageUrl(championName);
-        setImageUrl(url);
-      };
-      loadImage();
+    useEffect(() => {
+        setImageError(false); // Reset error when championName changes
     }, [championName]);
 
     return (
@@ -268,7 +313,7 @@ const LoLArena = () => {
           />
         ) : (
           <div className="champion-fallback">
-            <span>{championName.charAt(0)}</span>
+            <span>{championName ? championName.charAt(0) : '?'}</span>
           </div>
         )}
         <div className="champion-level">
@@ -278,73 +323,49 @@ const LoLArena = () => {
     );
   };
 
-  // Item Component
-  const ItemSlot = ({ itemId, index }) => {
-    const [imageUrl, setImageUrl] = useState(null);
-    const [imageError, setImageError] = useState(false);
+  // Item Component - Uses preloaded cache
+  const ItemSlot = ({ itemId }) => {
+    const imageUrl = imageCache[`item_${itemId}`];
+    const [imageError, setImageError] = useState(false); // Local state for individual image errors
 
-    React.useEffect(() => {
-      if (itemId && itemId !== 0) {
-        const loadImage = async () => {
-          const url = await getItemImageUrl(itemId);
-          setImageUrl(url);
-        };
-        loadImage();
-      }
+    useEffect(() => {
+        setImageError(false); // Reset error when itemId changes
     }, [itemId]);
+
+    if (!itemId || itemId === 0) return <div className="item-slot empty"></div>;
 
     return (
       <div
-        className={`item-slot ${itemId && itemId !== 0 ? 'filled' : 'empty'}`}
-        title={itemId ? `Item ${itemId}` : 'Empty slot'}
+        className="item-slot filled"
+        title={`Item ID: ${itemId}`}
       >
-        {itemId && itemId !== 0 ? (
-          imageUrl && !imageError ? (
-            <img
-              src={imageUrl}
-              alt={`Item ${itemId}`}
-              className="item-image"
-              onError={() => setImageError(true)}
-            />
-          ) : (
-            <span className="item-id">{itemId.toString().slice(-2)}</span>
-          )
-        ) : null}
+        {imageUrl && !imageError ? (
+          <img
+            src={imageUrl}
+            alt={`Item ${itemId}`}
+            className="item-image"
+            onError={() => setImageError(true)}
+          />
+        ) : (
+          <span className="item-id">{itemId.toString().slice(-2)}</span>
+        )}
       </div>
     );
   };
 
-  // Fixed Augment Component
+  // Augment Component - Uses preloaded cache and augmentData for name
   const AugmentSlot = ({ augmentId }) => {
-    const [imageUrl, setImageUrl] = useState(null);
-    const [imageError, setImageError] = useState(false);
+    const imageUrl = imageCache[`augment_${augmentId}`];
+    const [imageError, setImageError] = useState(false); // Local state for individual image errors
 
-    // Find augment info from the loaded data
-    const augmentInfo = augmentData.find(
-      a => String(a.id) === String(augmentId) || a.apiName === augmentId
-    );
-
-    React.useEffect(() => {
-      if (!augmentId || augmentId === 0) return;
-
-      const loadAugmentImage = async () => {
-        try {
-          const url = await getAugmentImageUrl(augmentId);
-          if (url) {
-            setImageUrl(url);
-          }
-        } catch (err) {
-          console.error('Failed to load augment image:', err);
-          setImageError(true);
-        }
-      };
-
-      loadAugmentImage();
+    useEffect(() => {
+        setImageError(false); // Reset error when augmentId changes
     }, [augmentId]);
 
-    if (!augmentId || augmentId === 0) return null;
-
+    const augmentInfo = augmentData.find(a => String(a.id) === String(augmentId) || a.apiName === augmentId);
     const displayName = augmentInfo?.name || `Augment ${augmentId}`;
+
+    if (!augmentId || augmentId === 0) return null;
 
     return (
       <div className="augment-slot" title={displayName}>
@@ -364,18 +385,25 @@ const LoLArena = () => {
     );
   };
 
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter') {
+      handleSearch(e);
+    }
+  };
+
+
   return (
     <div className="lol-arena-container">
       <div className="container">
         {/* Header */}
-        <div className="header">
-          <h1>LoL Arena</h1>
-          <p>League of Legends Match History Lookup</p>
-        </div>
+        <header className="header">
+          <h1>LoL Arena Stats & Predictor</h1>
+          <p>Search for a player to view their Arena match history and get a win prediction!</p>
+        </header>
 
         {/* Search Form */}
         <div className="search-container">
-          <div className="search-form">
+          <form onSubmit={handleSearch} className="search-form">
             <div className="form-group">
               <label htmlFor="gameName">Summoner Name</label>
               <input
@@ -387,6 +415,7 @@ const LoLArena = () => {
                 className="form-input"
                 disabled={loading}
                 onKeyPress={handleKeyPress}
+                required
               />
             </div>
             <div className="form-group">
@@ -400,10 +429,11 @@ const LoLArena = () => {
                 className="form-input"
                 disabled={loading}
                 onKeyPress={handleKeyPress}
+                required
               />
             </div>
             <button
-              onClick={searchPlayer}
+              type="submit"
               disabled={loading}
               className="search-button"
             >
@@ -416,7 +446,7 @@ const LoLArena = () => {
                 </>
               )}
             </button>
-          </div>
+          </form>
         </div>
 
         {/* Error */}
@@ -428,28 +458,55 @@ const LoLArena = () => {
 
         {/* Player Info */}
         {player && (
-          <div className="player-info">
+          <div className="player-profile">
             <h2 className="player-name">
               {player.gameName}#{player.tagLine}
             </h2>
-            <p className="player-puuid">PUUID: {player.puuid.substring(0, 8)}...</p>
+            {/* Prediction Result Display */}
+            <div className="prediction-section">
+                <h3>Arena Win Prediction (Based on Latest Match):</h3>
+                {predictionLoading && <p>Getting prediction...</p>}
+                {predictionError && <p className="error-message">{predictionError}</p>}
+                {predictionResult && (
+                    <div className="prediction-card">
+                        <p>
+                            **Predicted Outcome:**{' '}
+                            <span className={predictionResult.prediction === 1 ? 'prediction-win' : 'prediction-loss'}>
+                                {predictionResult.prediction === 1 ? 'WIN' : 'LOSS'}
+                            </span>
+                        </p>
+                        <p>
+                            **Confidence:** {((predictionResult.win_probability || 0) * 100).toFixed(2)}% chance of winning
+                        </p>
+                        <p className="prediction-note">
+                            *This prediction is based on your latest Arena match statistics and the trained model.*
+                        </p>
+                    </div>
+                )}
+                {!predictionLoading && !predictionResult && !predictionError && matches.length > 0 && (
+                    <p className="no-prediction">Prediction not yet generated for this session. Search for a player to generate one!</p>
+                )}
+                 {!predictionLoading && !predictionResult && !predictionError && matches.length === 0 && (
+                    <p className="no-prediction">No Arena matches found to generate a prediction.</p>
+                )}
+            </div>
           </div>
         )}
 
         {/* Match History */}
         {matches.length > 0 && (
           <div className="match-history-container">
-            <h3 className="match-history-title">Match History</h3>
+            <h3 className="match-history-title">Recent Arena Matches</h3>
             <div className="match-list">
-              {matches.map((match, index) => (
+              {matches.map((match) => (
                 <div
                   key={match.matchId}
-                  className={`match-item ${match.player.win ? 'win' : 'loss'}`}
+                  className={`match-item ${getOutcomeClass(match.player.placement)}`}
                 >
                   <div className="match-left">
                     <div className="match-result">
                       <div className={`result-text ${match.player.win ? 'win' : 'loss'}`}>
-                        {match.player.win ? 'Victory' : 'Defeat'}
+                        {getPlacementText(match.player.placement)}
                       </div>
                       <div className="time-ago">
                         {formatTimeAgo(match.gameCreation)}
@@ -486,9 +543,10 @@ const LoLArena = () => {
 
                   <div className="items-section">
                     <div className="items-row">
-                      {Array.from({ length: 6 }, (_, i) => {
+                      {/* Items */}
+                      {Array.from({ length: 7 }, (_, i) => { // Arena has 7 item slots
                         const itemId = match.player.items && match.player.items[i];
-                        return <ItemSlot key={i} itemId={itemId} index={i} />;
+                        return <ItemSlot key={i} itemId={itemId} />;
                       })}
                     </div>
                     
@@ -514,11 +572,22 @@ const LoLArena = () => {
                           {(match.player.goldEarned / 1000).toFixed(1)}k
                         </div>
                       </div>
+                      <div>
+                        <div className="stat-label">Damage Dealt</div>
+                        <div className="stat-value">{(match.player.totalDamageDealt / 1000).toFixed(0)}k</div>
+                      </div>
+                      <div>
+                        <div className="stat-label">Damage Taken</div>
+                        <div className="stat-value">{(match.player.totalDamageTaken / 1000).toFixed(0)}k</div>
+                      </div>
                     </div>
-                    <div className="vision-score">
-                      <span className="label">Vision: </span>
-                      <span className="value">{match.player.visionScore || 0}</span>
-                    </div>
+                    {/* Vision score is typically not relevant for Arena, but keeping it if it was in your original */}
+                    {match.player.visionScore !== undefined && (
+                        <div className="vision-score">
+                            <span className="label">Vision: </span>
+                            <span className="value">{match.player.visionScore || 0}</span>
+                        </div>
+                    )}
                   </div>
                 </div>
               ))}
@@ -534,10 +603,10 @@ const LoLArena = () => {
           </div>
         )}
 
-        {/* No matches */}
+        {/* No matches found after search */}
         {player && matches.length === 0 && !loading && !error && (
           <div className="no-matches">
-            <p>No recent matches found for this player.</p>
+            <p>No recent Arena matches found for this player.</p>
           </div>
         )}
       </div>

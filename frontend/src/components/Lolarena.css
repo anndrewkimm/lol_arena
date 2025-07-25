@@ -1,3 +1,53 @@
+/* Lolarena.css additions for Prediction Section */
+.prediction-section {
+  background: rgba(45, 55, 72, 0.7); /* Darker background */
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin-top: 2rem;
+  text-align: center;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+}
+
+.prediction-section h3 {
+  font-size: 1.6rem;
+  color: #90cdf4; /* Light blue */
+  margin-bottom: 1rem;
+}
+
+.prediction-card {
+  background: #2d3748; /* Slightly lighter than section background */
+  border-radius: 6px;
+  padding: 1rem;
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.2);
+}
+
+.prediction-card p {
+  margin-bottom: 0.5rem;
+  font-size: 1.1rem;
+  color: #e2e8f0; /* Off-white */
+}
+
+.prediction-win {
+  color: #48bb78; /* Green */
+  font-weight: bold;
+}
+
+.prediction-loss {
+  color: #f56565; /* Red */
+  font-weight: bold;
+}
+
+.prediction-note {
+  font-size: 0.85rem;
+  color: #a0aec0; /* Grey */
+  margin-top: 1rem;
+}
+
+.no-prediction {
+    color: #a0aec0;
+    font-style: italic;
+}
+
 .lol-arena-container {
     min-height: 100vh;
     background: linear-gradient(135deg, #1e3a8a 0%, #581c87 50%, #312e81 100%);

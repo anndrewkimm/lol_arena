@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
+const { spawn } = require('child_process'); // ADDED: Import spawn for child processes
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -45,7 +46,7 @@ const getCurrentVersion = async () => {
   } catch (error) {
     console.error('❌ Failed to get Data Dragon version:', error.message);
     // Fallback to a recent version
-    return '14.23.1';
+    return '14.23.1'; // Fallback to a known recent version if fetching fails
   }
 };
 
@@ -152,10 +153,13 @@ app.get('/api/matches/:puuid', async (req, res) => {
             kills: playerData.kills,
             deaths: playerData.deaths,
             assists: playerData.assists,
+            totalDamageDealt: playerData.totalDamageDealt, // ADDED: Required for ML model
+            totalDamageTaken: playerData.totalDamageTaken, // ADDED: Required for ML model
+            goldEarned: playerData.goldEarned,           // ADDED: Required for ML model
             totalMinionsKilled: playerData.totalMinionsKilled,
-            goldEarned: playerData.goldEarned,
             champLevel: playerData.champLevel,
-            win: playerData.win,
+            win: playerData.win, // This is a boolean indicating actual win/loss
+            placement: playerData.placement, // ADDED: For Arena, placement determines win
             items: [
               playerData.item0,
               playerData.item1,
@@ -165,7 +169,7 @@ app.get('/api/matches/:puuid', async (req, res) => {
               playerData.item5,
               playerData.item6
             ].filter(item => item !== 0),
-            // Add augments for Arena mode
+            // Add augments for Arena mode (playerAugment1, etc. are correct)
             augments: [
               playerData.playerAugment1,
               playerData.playerAugment2,
@@ -176,12 +180,12 @@ app.get('/api/matches/:puuid', async (req, res) => {
         };
       } catch (err) {
         console.error('Failed to get match details for:', matchId);
-        return null;
+        return null; // Return null for failed match details
       }
     });
     
     const matches = await Promise.all(matchPromises);
-    const validMatches = matches.filter(match => match !== null);
+    const validMatches = matches.filter(match => match !== null); // Filter out failed matches
     
     console.log('✅ Retrieved details for', validMatches.length, 'matches');
     
@@ -397,6 +401,9 @@ app.get('/api/images/augment/:augmentId', (req, res) => {
     }
 
     // Create image URL
+    // Note: This URL pattern is based on your original example and common CDragon paths.
+    // If it doesn't work for all augments, you might need to inspect the CDragon data
+    // more closely for the exact asset paths.
     const imageUrl = `https://raw.communitydragon.org/latest/game/assets/ux/cherry/augments/icons/${cleanName}_large.png`;
     const augmentName = augmentInfo?.name || `Augment ${augmentId}`;
 
@@ -435,9 +442,6 @@ app.get('/api/images/augment/:augmentId', (req, res) => {
     });
   }
 });
-
-
-
 
 
 // Get multiple champion images at once
@@ -528,23 +532,95 @@ app.post('/api/images/items', async (req, res) => {
   }
 });
 
-// Get Data Dragon version info
-app.get('/api/version', async (req, res) => {
-  try {
-    const version = await getCurrentVersion();
-    res.json({
-      success: true,
-      version,
-      cached: !!(currentVersion && versionCacheTime)
-    });
-  } catch (error) {
-    console.error('❌ Version lookup failed:', error.message);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to get version'
-    });
-  }
+// ADDED: API endpoint for ML model prediction
+app.post('/api/predict-arena-win', async (req, res) => {
+    // These are the features expected by your Python model
+    const { championId, kills, deaths, assists, totalDamageDealt, totalDamageTaken, goldEarned } = req.body;
+
+    // Validate input data
+    const requiredFeatures = ['championId', 'kills', 'deaths', 'assists', 'totalDamageDealt', 'totalDamageTaken', 'goldEarned'];
+    const missingFeatures = requiredFeatures.filter(feature => req.body[feature] === undefined || req.body[feature] === null);
+
+    if (missingFeatures.length > 0) {
+        return res.status(400).json({
+            success: false,
+            error: `Missing required features for prediction: ${missingFeatures.join(', ')}`
+        });
+    }
+
+    const inputData = {
+        championId: championId,
+        kills: kills,
+        deaths: deaths,
+        assists: assists,
+        totalDamageDealt: totalDamageDealt,
+        totalDamageTaken: totalDamageTaken,
+        goldEarned: goldEarned
+    };
+
+    // Convert input data to a JSON string for the Python script
+    const inputJson = JSON.stringify(inputData);
+
+    try {
+        // Spawn Python process. Adjust 'python' to 'python3' or full path if needed.
+        const pythonProcess = spawn('python', ['predict_service.py', inputJson]);
+
+        let predictionOutput = '';
+        let predictionError = '';
+
+        pythonProcess.stdout.on('data', (data) => {
+            predictionOutput += data.toString();
+        });
+
+        pythonProcess.stderr.on('data', (data) => {
+            predictionError += data.toString();
+            console.error(`Python stderr: ${data.toString()}`);
+        });
+
+        pythonProcess.on('close', (code) => {
+            if (code === 0) {
+                try {
+                    const result = JSON.parse(predictionOutput);
+                    res.json({
+                        success: true,
+                        prediction: result.prediction,
+                        win_probability: result.win_probability
+                    });
+                } catch (jsonParseError) {
+                    console.error('Error parsing Python output:', jsonParseError);
+                    res.status(500).json({
+                        success: false,
+                        error: 'Failed to parse prediction output from Python script.',
+                        details: predictionOutput
+                    });
+                }
+            } else {
+                console.error(`Python script exited with code ${code}`);
+                res.status(500).json({
+                    success: false,
+                    error: 'Prediction script failed.',
+                    details: predictionError || 'Unknown error from Python script.'
+                });
+            }
+        });
+
+        pythonProcess.on('error', (err) => {
+            console.error('Failed to start Python subprocess:', err);
+            res.status(500).json({
+                success: false,
+                error: `Failed to execute prediction service. Is Python installed and predict_service.py in the root directory? Error: ${err.message}`
+            });
+        });
+
+    } catch (error) {
+        console.error('Error in /api/predict-arena-win:', error);
+        res.status(500).json({
+            success: false,
+            error: 'An internal server error occurred during prediction.'
+        });
+    }
 });
+
 
 // Health check
 app.get('/health', (req, res) => {
@@ -568,6 +644,8 @@ app.listen(port, () => {
   console.log('  GET /api/images/augment/:augmentId - Get augment image');
   console.log('  POST /api/images/champions - Get multiple champion images');
   console.log('  POST /api/images/items - Get multiple item images');
+  console.log('  GET /api/augments - Get all augment data'); // ADDED: New endpoint you added
   console.log('  GET /api/version - Get Data Dragon version');
+  console.log('  POST /api/predict-arena-win - Get win prediction for Arena game'); // ADDED: Your new prediction endpoint
   console.log('  GET /health - Health check');
 });
