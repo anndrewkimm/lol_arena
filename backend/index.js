@@ -533,94 +533,33 @@ app.post('/api/images/items', async (req, res) => {
 });
 
 // ADDED: API endpoint for ML model prediction
-app.post('/api/predict-arena-win', async (req, res) => {
-    // These are the features expected by your Python model
-    const { championId, kills, deaths, assists, totalDamageDealt, totalDamageTaken, goldEarned } = req.body;
+app.post('/api/predict-arena-win', (req, res) => {
+  const py = spawn('python', ['data_collection/predict_service.py']);
+  let result = '';
+  let error = '';
 
-    // Validate input data
-    const requiredFeatures = ['championId', 'kills', 'deaths', 'assists', 'totalDamageDealt', 'totalDamageTaken', 'goldEarned'];
-    const missingFeatures = requiredFeatures.filter(feature => req.body[feature] === undefined || req.body[feature] === null);
+  py.stdin.write(JSON.stringify(req.body));
+  py.stdin.end();
 
-    if (missingFeatures.length > 0) {
-        return res.status(400).json({
-            success: false,
-            error: `Missing required features for prediction: ${missingFeatures.join(', ')}`
-        });
+  py.stdout.on('data', (data) => {
+    result += data.toString();
+  });
+
+  py.stderr.on('data', (data) => {
+    error += data.toString();
+  });
+
+  py.on('close', (code) => {
+    if (code !== 0 || error) {
+      return res.status(500).json({ success: false, error: error || 'Prediction failed.' });
     }
-
-    const inputData = {
-        championId: championId,
-        kills: kills,
-        deaths: deaths,
-        assists: assists,
-        totalDamageDealt: totalDamageDealt,
-        totalDamageTaken: totalDamageTaken,
-        goldEarned: goldEarned
-    };
-
-    // Convert input data to a JSON string for the Python script
-    const inputJson = JSON.stringify(inputData);
-
     try {
-        // Spawn Python process. Adjust 'python' to 'python3' or full path if needed.
-        const pythonProcess = spawn('python', ['predict_service.py', inputJson]);
-
-        let predictionOutput = '';
-        let predictionError = '';
-
-        pythonProcess.stdout.on('data', (data) => {
-            predictionOutput += data.toString();
-        });
-
-        pythonProcess.stderr.on('data', (data) => {
-            predictionError += data.toString();
-            console.error(`Python stderr: ${data.toString()}`);
-        });
-
-        pythonProcess.on('close', (code) => {
-            if (code === 0) {
-                try {
-                    const result = JSON.parse(predictionOutput);
-                    res.json({
-                        success: true,
-                        prediction: result.prediction,
-                        win_probability: result.win_probability
-                    });
-                } catch (jsonParseError) {
-                    console.error('Error parsing Python output:', jsonParseError);
-                    res.status(500).json({
-                        success: false,
-                        error: 'Failed to parse prediction output from Python script.',
-                        details: predictionOutput
-                    });
-                }
-            } else {
-                console.error(`Python script exited with code ${code}`);
-                res.status(500).json({
-                    success: false,
-                    error: 'Prediction script failed.',
-                    details: predictionError || 'Unknown error from Python script.'
-                });
-            }
-        });
-
-        pythonProcess.on('error', (err) => {
-            console.error('Failed to start Python subprocess:', err);
-            res.status(500).json({
-                success: false,
-                error: `Failed to execute prediction service. Is Python installed and predict_service.py in the root directory? Error: ${err.message}`
-            });
-        });
-
-    } catch (error) {
-        console.error('Error in /api/predict-arena-win:', error);
-        res.status(500).json({
-            success: false,
-            error: 'An internal server error occurred during prediction.'
-        });
+      res.json(JSON.parse(result));
+    } catch (e) {
+      res.status(500).json({ success: false, error: 'Invalid response from Python script.' });
     }
+  });
 });
-
 
 // Health check
 app.get('/health', (req, res) => {
