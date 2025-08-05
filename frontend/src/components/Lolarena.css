@@ -538,3 +538,21 @@
     border-top-color: #463714;
     z-index: 1000;
   }
+  
+  /* Model Placement Prediction Styles */
+.placement-prediction {
+  background: rgba(56, 189, 248, 0.08); /* Light blue background */
+  border-left: 4px solid #38bdf8;        /* Blue accent */
+  margin-top: 10px;
+  margin-bottom: 6px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 1rem;
+  color: #e0e7ef;
+  box-shadow: 0 2px 8px rgba(56, 189, 248, 0.05);
+}
+
+.placement-prediction strong {
+  color: #38bdf8;
+  font-weight: 600;
+}

@@ -5,13 +5,14 @@ from sklearn.pipeline import Pipeline
 from sklearn.model_selection import cross_val_score
 from xgboost import XGBClassifier
 import joblib
+import numpy as np
 
 # Load data
 data = pd.read_csv('backend/data_collection/ArenaData.csv')
 
-# Create target variable 'Wins'
-data['Wins'] = data['placement'].apply(lambda x: 1 if x in [1,2,3,4] else 0)
-y = data['Wins']
+# Create target variable 'placement_encoded'
+# This converts the 1-8 placements to 0-7, as expected by XGBoost
+y = data['placement'] - 1
 
 # Select features
 features = ['championId', 'kills', 'deaths', 'assists', 'totalDamageDealt', 'totalDamageTaken', 'goldEarned']
@@ -20,41 +21,67 @@ X = data[features]
 # Split data
 train_X, val_X, train_y, val_y = train_test_split(X, y, train_size=0.8, random_state=42)
 
-def get_accuracy(max_depth, train_X, val_X, train_y, val_y):
-    # Pass 'early_stopping_rounds' and 'eval_metric' to the model constructor
+# --- UPDATED: Calculate a more aggressive custom sample weighting ---
+# This is a more robust way to handle extreme class imbalance.
+# We manually calculate weights that are inversely proportional to class frequencies,
+# giving a much higher weight to the minority classes (placements 5-8).
+class_counts = np.bincount(train_y)
+max_count = np.max(class_counts)
+class_weights = max_count / class_counts
+sample_weights = np.array([class_weights[label] for label in train_y])
+
+
+def get_accuracy(max_depth, train_X, val_X, train_y, val_y, sample_weights):
+    """
+    Trains and evaluates an XGBoost model with a specific max_depth,
+    applying sample weights to handle class imbalance.
+    """
     model_pipeline = Pipeline(steps=[
         ('model', XGBClassifier(
-            n_estimators=1000, 
-            learning_rate=0.05, 
+            n_estimators=1000,
+            learning_rate=0.05,
             max_depth=max_depth,
-            eval_metric='logloss',
-            early_stopping_rounds=10  # Now a constructor parameter
+            objective='multi:softprob',
+            num_class=8,  # 8 classes for placements 1-8
+            eval_metric='mlogloss',
+            early_stopping_rounds=10
         ))
     ])
-    
-    # Pass 'eval_set' directly to the pipeline's fit method
+
+    # Pass 'eval_set' and 'sample_weight' to the fit method
+    # and use the special 'model__' prefix to pass sample_weights to the
+    # XGBClassifier step within the pipeline.
     model_pipeline.fit(
-        train_X, 
-        train_y, 
-        model__eval_set=[(val_X, val_y)]
+        train_X,
+        train_y,
+        model__eval_set=[(val_X, val_y)],
+        model__sample_weight=sample_weights # <-- The key addition
     )
-    
+
     predictions = model_pipeline.predict(val_X)
     accuracy = accuracy_score(val_y, predictions)
-    report = classification_report(val_y, predictions)
+    report = classification_report(val_y, predictions, zero_division=0)
     importances = model_pipeline.named_steps['model'].feature_importances_
     return accuracy, report, importances, model_pipeline
 
 def get_cross_val_score(max_depth, X, y):
-    # The 'early_stopping_rounds' parameter is not used here for cross_val_score
+    """
+    Calculates the cross-validation score for a model with a specific max_depth.
+    
+    Note: The sample_weight logic for cross_val_score is more complex, but we'll 
+    just show a simplified version here for demonstration.
+    """
     pipeline = Pipeline([
         ('model', XGBClassifier(
-            n_estimators=100, 
-            learning_rate=0.05, 
-            max_depth=max_depth, 
-            eval_metric='logloss'
+            n_estimators=100,
+            learning_rate=0.05,
+            max_depth=max_depth,
+            eval_metric='mlogloss',
+            objective='multi:softprob',
+            num_class=8
         ))
     ])
+    
     scores = cross_val_score(pipeline, X, y, cv=5, scoring='accuracy')
     return scores.mean(), scores.std()
 
@@ -65,7 +92,7 @@ best_model_pipeline = None
 
 for max_depth in [2, 4, 6, 8, 10]:
     try:
-        accuracy, report, importances, model_pipeline = get_accuracy(max_depth, train_X, val_X, train_y, val_y)
+        accuracy, report, importances, model_pipeline = get_accuracy(max_depth, train_X, val_X, train_y, val_y, sample_weights)
         
         print(f"Max depth: {max_depth} \t Accuracy: {accuracy:.4f}")
         print("Classification report:")
@@ -99,3 +126,5 @@ if best_model_pipeline:
     print(f"\n✅ Trained model saved as '{model_filename}' with max_depth={best_max_depth} and validation accuracy={best_accuracy:.4f}")
 else:
     print("\n⚠️ No model was saved. Ensure the training loop correctly identifies and stores the best model.")
+
+print(y.value_counts().sort_index())

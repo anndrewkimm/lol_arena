@@ -15,6 +15,7 @@ const LoLArena = () => {
   const [predictionResult, setPredictionResult] = useState(null); 
   const [predictionLoading, setPredictionLoading] = useState(false);
   const [predictionError, setPredictionError] = useState('');
+  const [placementPredictions, setPlacementPredictions] = useState({});
 
   const API_BASE = 'http://localhost:3001';
 
@@ -207,7 +208,7 @@ const LoLArena = () => {
       setPlayer(playerData.player);
 
       // Step 2: Get Match History
-      const matchesResponse = await fetch(`${API_BASE}/api/matches/${playerData.player.puuid}?count=10`);
+      const matchesResponse = await fetch(`${API_BASE}/api/matches/${playerData.player.puuid}?count=20`);
       const matchesData = await matchesResponse.json();
 
       if (!matchesData.success) {
@@ -236,6 +237,43 @@ const LoLArena = () => {
         predictArenaWin(statsForPrediction);
       } else {
         setPredictionError('No Arena matches found to generate a prediction.');
+      }
+
+      // Predict placements for all matches
+      if (arenaMatches.length > 0) {
+        try {
+          const response = await fetch(`${API_BASE}/api/predict-arena-placements`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              matches: arenaMatches.map(match => ({
+                matchId: match.matchId,
+                championId: match.player.championId,
+                kills: match.player.kills,
+                deaths: match.player.deaths,
+                assists: match.player.assists,
+                totalDamageDealt: match.player.totalDamageDealt,
+                totalDamageTaken: match.player.totalDamageTaken,
+                goldEarned: match.player.goldEarned
+              }))
+            })
+          });
+          const data = await response.json();
+      // Corrected handleSearch function snippet
+      if (data.success) {
+          const placementMap = {};
+          data.results.forEach(r => {
+              placementMap[r.matchId] = {
+                  placement: r.placement + 1, // Add 1 for user-facing display
+                  confidence: r.confidence
+              };
+          });
+          setPlacementPredictions(placementMap);
+          console.log('Placement predictions:', placementMap);
+      }
+        } catch (err) {
+          console.error('Failed to get placement predictions:', err);
+        }
       }
 
     } catch (err) {
@@ -589,6 +627,14 @@ const LoLArena = () => {
                         </div>
                     )}
                   </div>
+
+                  {placementPredictions[match.matchId] && (
+                    <div className="placement-prediction">
+                      <strong>Predicted Placement:</strong> {placementPredictions[match.matchId].placement}
+                      <br />
+                      <strong>Confidence:</strong> {(placementPredictions[match.matchId].confidence * 100).toFixed(1)}%
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
