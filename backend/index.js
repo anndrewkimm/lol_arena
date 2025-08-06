@@ -538,7 +538,7 @@ app.post('/api/images/items', async (req, res) => {
   }
 });
 
-/*
+
 // ADDED: API endpoint for ML model prediction
 app.post('/api/predict-arena-win', (req, res) => {
   const py = spawn('python', ['data_collection/predict_service.py']);
@@ -567,9 +567,9 @@ app.post('/api/predict-arena-win', (req, res) => {
     }
   });
 });
-*/
 
-app.post('/api/predict-arena-placements', (req, res) => {
+
+/*app.post('/api/predict-arena-placements', (req, res) => {
   const { matches } = req.body;
   if (!Array.isArray(matches) || matches.length === 0) {
     return res.status(400).json({ success: false, error: 'No matches provided' });
@@ -601,7 +601,69 @@ app.post('/api/predict-arena-placements', (req, res) => {
     }
   });
 });
+*/
 
+app.post('/api/predict-arena-placements', (req, res) => {
+  const { matches } = req.body;
+  console.log('\n=== BATCH PREDICTION DEBUG ===');
+  console.log('Number of matches received:', matches?.length);
+  console.log('Sample match data:');
+  console.log(JSON.stringify(matches?.[0], null, 2));
+  
+  if (!Array.isArray(matches) || matches.length === 0) {
+    return res.status(400).json({ success: false, error: 'No matches provided' });
+  }
+
+  // Log the exact JSON being sent to Python
+  const jsonData = JSON.stringify(matches);
+  console.log('JSON being sent to Python script:');
+  console.log(jsonData.substring(0, 500) + '...');
+
+  const py = spawn('python', ['data_collection/predict_service.py', '--batch']);
+  let result = '';
+  let error = '';
+
+  // Log Python process creation
+  console.log('Python process spawned with PID:', py.pid);
+
+  py.stdin.write(jsonData);
+  py.stdin.end();
+
+  py.stdout.on('data', (data) => {
+    const chunk = data.toString();
+    console.log('Python stdout chunk:', chunk);
+    result += chunk;
+  });
+
+  py.stderr.on('data', (data) => {
+    const chunk = data.toString();
+    console.log('Python stderr chunk:', chunk);
+    error += chunk;
+  });
+
+  py.on('close', (code) => {
+    console.log('Python process closed with code:', code);
+    console.log('Final result:', result);
+    console.log('Final error:', error);
+    
+    if (code !== 0 || error) {
+      return res.status(500).json({ success: false, error: error || 'Prediction failed.' });
+    }
+    try {
+      const parsedResult = JSON.parse(result);
+      console.log('Parsed prediction result:', JSON.stringify(parsedResult, null, 2));
+      res.json(parsedResult);
+    } catch (e) {
+      console.log('JSON parse error:', e.message);
+      res.status(500).json({ success: false, error: 'Invalid response from Python script.' });
+    }
+  });
+
+  py.on('error', (err) => {
+    console.log('Python process error:', err);
+    res.status(500).json({ success: false, error: 'Failed to start Python process: ' + err.message });
+  });
+});
 
 // Health check
 app.get('/health', (req, res) => {

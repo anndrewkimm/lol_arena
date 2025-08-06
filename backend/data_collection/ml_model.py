@@ -21,20 +21,9 @@ X = data[features]
 # Split data
 train_X, val_X, train_y, val_y = train_test_split(X, y, train_size=0.8, random_state=42)
 
-# --- UPDATED: Calculate a more aggressive custom sample weighting ---
-# This is a more robust way to handle extreme class imbalance.
-# We manually calculate weights that are inversely proportional to class frequencies,
-# giving a much higher weight to the minority classes (placements 5-8).
-class_counts = np.bincount(train_y)
-max_count = np.max(class_counts)
-class_weights = max_count / class_counts
-sample_weights = np.array([class_weights[label] for label in train_y])
-
-
-def get_accuracy(max_depth, train_X, val_X, train_y, val_y, sample_weights):
+def get_accuracy(max_depth, train_X, val_X, train_y, val_y):
     """
-    Trains and evaluates an XGBoost model with a specific max_depth,
-    applying sample weights to handle class imbalance.
+    Trains and evaluates an XGBoost model with a specific max_depth.
     """
     model_pipeline = Pipeline(steps=[
         ('model', XGBClassifier(
@@ -48,14 +37,11 @@ def get_accuracy(max_depth, train_X, val_X, train_y, val_y, sample_weights):
         ))
     ])
 
-    # Pass 'eval_set' and 'sample_weight' to the fit method
-    # and use the special 'model__' prefix to pass sample_weights to the
-    # XGBClassifier step within the pipeline.
+    # Pass 'eval_set' correctly to the fit method.
     model_pipeline.fit(
         train_X,
         train_y,
         model__eval_set=[(val_X, val_y)],
-        model__sample_weight=sample_weights # <-- The key addition
     )
 
     predictions = model_pipeline.predict(val_X)
@@ -67,9 +53,6 @@ def get_accuracy(max_depth, train_X, val_X, train_y, val_y, sample_weights):
 def get_cross_val_score(max_depth, X, y):
     """
     Calculates the cross-validation score for a model with a specific max_depth.
-    
-    Note: The sample_weight logic for cross_val_score is more complex, but we'll 
-    just show a simplified version here for demonstration.
     """
     pipeline = Pipeline([
         ('model', XGBClassifier(
@@ -81,7 +64,7 @@ def get_cross_val_score(max_depth, X, y):
             num_class=8
         ))
     ])
-    
+
     scores = cross_val_score(pipeline, X, y, cv=5, scoring='accuracy')
     return scores.mean(), scores.std()
 
@@ -92,8 +75,8 @@ best_model_pipeline = None
 
 for max_depth in [2, 4, 6, 8, 10]:
     try:
-        accuracy, report, importances, model_pipeline = get_accuracy(max_depth, train_X, val_X, train_y, val_y, sample_weights)
-        
+        accuracy, report, importances, model_pipeline = get_accuracy(max_depth, train_X, val_X, train_y, val_y)
+
         print(f"Max depth: {max_depth} \t Accuracy: {accuracy:.4f}")
         print("Classification report:")
         print(report)
@@ -101,7 +84,7 @@ for max_depth in [2, 4, 6, 8, 10]:
         for feature, importance in zip(features, importances):
             print(f"{feature}: {importance:.4f}")
         print('-' * 50)
-        
+
         if accuracy > best_accuracy:
             best_accuracy = accuracy
             best_max_depth = max_depth

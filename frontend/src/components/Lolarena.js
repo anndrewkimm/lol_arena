@@ -264,7 +264,7 @@ const LoLArena = () => {
           const placementMap = {};
           data.results.forEach(r => {
               placementMap[r.matchId] = {
-                  placement: r.placement + 1, // Add 1 for user-facing display
+                  placement: r.placement, // Add 1 for user-facing display
                   confidence: r.confidence
               };
           });
@@ -505,22 +505,28 @@ const LoLArena = () => {
                 <h3>Arena Win Prediction (Based on Latest Match):</h3>
                 {predictionLoading && <p>Getting prediction...</p>}
                 {predictionError && <p className="error-message">{predictionError}</p>}
-                {predictionResult && (
-                    <div className="prediction-card">
-                        <p>
-                            **Predicted Outcome:**{' '}
-                            <span className={predictionResult.prediction === 1 ? 'prediction-win' : 'prediction-loss'}>
-                                {predictionResult.prediction === 1 ? 'WIN' : 'LOSS'}
-                            </span>
-                        </p>
-                        <p>
-                            **Confidence:** {((predictionResult.win_probability || 0) * 100).toFixed(2)}% chance of winning
-                        </p>
-                        <p className="prediction-note">
-                            *This prediction is based on your latest Arena match statistics and the trained model.*
-                        </p>
-                    </div>
-                )}
+              {predictionResult && (
+                  <div className="prediction-card">
+                      <p>
+                          <strong>Predicted Placement:</strong>{' '}
+                          <span className={`prediction-placement placement-${predictionResult.placement}`}>
+                              {getPlacementText(predictionResult.placement)}
+                          </span>
+                      </p>
+                      <p>
+                          <strong>Confidence:</strong> {(predictionResult.confidence * 100).toFixed(1)}%
+                      </p>
+                      <p>
+                          <strong>Expected Outcome:</strong>{' '}
+                          <span className={predictionResult.placement <= 4 ? 'prediction-win' : 'prediction-loss'}>
+                              {predictionResult.placement <= 4 ? 'TOP 4 (WIN)' : 'BOTTOM 4 (LOSS)'}
+                          </span>
+                      </p>
+                      <p className="prediction-note">
+                          *This prediction is based on your latest Arena match statistics.*
+                      </p>
+                  </div>
+              )}
                 {!predictionLoading && !predictionResult && !predictionError && matches.length > 0 && (
                     <p className="no-prediction">Prediction not yet generated for this session. Search for a player to generate one!</p>
                 )}

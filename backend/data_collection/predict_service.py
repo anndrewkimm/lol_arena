@@ -8,27 +8,42 @@ features = ['championId', 'kills', 'deaths', 'assists', 'totalDamageDealt', 'tot
 
 def predict_batch(matches):
     X = pd.DataFrame(matches, columns=features)
-    preds = model.predict(X)
+    preds = model.predict(X)  # These are 0-7 predictions
     probs = model.predict_proba(X)
     results = []
+    
     for i, match in enumerate(matches):
-        pred = int(preds[i])
-        class_index = list(model.classes_).index(pred)
-        confidence = float(probs[i][class_index])
+        # Convert 0-7 prediction back to 1-8 placement
+        predicted_placement = int(preds[i]) + 1
+        
+        # Get confidence for the predicted class
+        predicted_class_index = int(preds[i])  # This is the index in the probability array
+        confidence = float(probs[i][predicted_class_index])
+        
         results.append({
             'matchId': match.get('matchId'),
-            'placement': pred,
+            'placement': predicted_placement,  # Now 1-8
             'confidence': confidence
         })
+    
     print(json.dumps({'success': True, 'results': results}))
 
 def predict_single(input_data):
     X = pd.DataFrame([[input_data[f] for f in features]], columns=features)
-    pred = int(model.predict(X)[0])
+    pred = int(model.predict(X)[0])  # This is 0-7
     probs = model.predict_proba(X)[0]
-    class_index = list(model.classes_).index(pred)
-    confidence = float(probs[class_index])
-    print(json.dumps({'success': True, 'placement': pred, 'confidence': confidence}))
+    
+    # Convert 0-7 prediction back to 1-8 placement
+    predicted_placement = pred + 1
+    
+    # Get confidence for the predicted class
+    confidence = float(probs[pred])  # pred is the index in the probability array
+    
+    print(json.dumps({
+        'success': True, 
+        'placement': predicted_placement,  # Now 1-8
+        'confidence': confidence
+    }))
 
 if __name__ == "__main__":
     if '--batch' in sys.argv:
@@ -37,5 +52,3 @@ if __name__ == "__main__":
     else:
         input_data = json.loads(sys.stdin.read())
         predict_single(input_data)
-    
-    
