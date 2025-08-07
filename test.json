@@ -1,0 +1,20 @@
+[
+    {
+        "championId": 432,
+        "kills": 0,
+        "deaths": 7,
+        "assists": 3,
+        "totalDamageDealt": 20000,
+        "totalDamageTaken": 18000,
+        "goldEarned": 9800
+    },
+    {
+        "championId": 105,
+        "kills": 19,
+        "deaths": 3,
+        "assists": 9,
+        "totalDamageDealt": 156000,
+        "totalDamageTaken": 36000,
+        "goldEarned": 23300
+    }
+]
