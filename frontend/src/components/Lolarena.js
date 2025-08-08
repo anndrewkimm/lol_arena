@@ -155,6 +155,8 @@ const LoLArena = () => {
 
   // Function to call the prediction service
   const predictArenaWin = async (playerStats) => {
+    console.log('Sending playerStats to backend:', playerStats);
+
     setPredictionLoading(true);
     setPredictionError('');
     setPredictionResult(null); // Clear previous prediction

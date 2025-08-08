@@ -104,7 +104,7 @@ for max_depth in [2, 4, 6, 8, 10]:
 
 # --- Save the trained model ---
 if best_model_pipeline:
-    model_filename = 'arena_win_predictor_model.joblib'
+    model_filename = './backend/data_collection/arena_win_predictor_model.joblib'
     joblib.dump(best_model_pipeline, model_filename)
     print(f"\n✅ Trained model saved as '{model_filename}' with max_depth={best_max_depth} and validation accuracy={best_accuracy:.4f}")
 else:

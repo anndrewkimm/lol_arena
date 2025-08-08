@@ -1,11 +1,16 @@
+import os
 import sys
 import json
 import joblib
 import pandas as pd
 
+# Get absolute path to model file relative to this script's location
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+model_path = os.path.join(BASE_DIR, 'arena_win_predictor_model.joblib')
+
 # Load your trained model
 try:
-    model = joblib.load('arena_win_predictor_model.joblib')
+    model = joblib.load(model_path)
 except FileNotFoundError:
     print(json.dumps({"success": False, "error": "Model file 'arena_win_predictor_model.joblib' not found."}))
     sys.exit(1)
