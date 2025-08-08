@@ -568,41 +568,6 @@ app.post('/api/predict-arena-win', (req, res) => {
   });
 });
 
-
-/*app.post('/api/predict-arena-placements', (req, res) => {
-  const { matches } = req.body;
-  if (!Array.isArray(matches) || matches.length === 0) {
-    return res.status(400).json({ success: false, error: 'No matches provided' });
-  }
-
-  const py = spawn('python', ['data_collection/predict_service.py', '--batch']);
-  let result = '';
-  let error = '';
-
-  py.stdin.write(JSON.stringify(matches));
-  py.stdin.end();
-
-  py.stdout.on('data', (data) => {
-    result += data.toString();
-  });
-
-  py.stderr.on('data', (data) => {
-    error += data.toString();
-  });
-
-  py.on('close', (code) => {
-    if (code !== 0 || error) {
-      return res.status(500).json({ success: false, error: error || 'Prediction failed.' });
-    }
-    try {
-      res.json(JSON.parse(result));
-    } catch (e) {
-      res.status(500).json({ success: false, error: 'Invalid response from Python script.' });
-    }
-  });
-});
-*/
-
 app.post('/api/predict-arena-placements', (req, res) => {
   const { matches } = req.body;
   console.log('\n=== BATCH PREDICTION DEBUG ===');

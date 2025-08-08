@@ -500,40 +500,7 @@ const LoLArena = () => {
             <h2 className="player-name">
               {player.gameName}#{player.tagLine}
             </h2>
-            {/* Prediction Result Display */}
-            <div className="prediction-section">
-                <h3>Arena Win Prediction (Based on Latest Match):</h3>
-                {predictionLoading && <p>Getting prediction...</p>}
-                {predictionError && <p className="error-message">{predictionError}</p>}
-              {predictionResult && (
-                  <div className="prediction-card">
-                      <p>
-                          <strong>Predicted Placement:</strong>{' '}
-                          <span className={`prediction-placement placement-${predictionResult.placement}`}>
-                              {getPlacementText(predictionResult.placement)}
-                          </span>
-                      </p>
-                      <p>
-                          <strong>Confidence:</strong> {(predictionResult.confidence * 100).toFixed(1)}%
-                      </p>
-                      <p>
-                          <strong>Expected Outcome:</strong>{' '}
-                          <span className={predictionResult.placement <= 4 ? 'prediction-win' : 'prediction-loss'}>
-                              {predictionResult.placement <= 4 ? 'TOP 4 (WIN)' : 'BOTTOM 4 (LOSS)'}
-                          </span>
-                      </p>
-                      <p className="prediction-note">
-                          *This prediction is based on your latest Arena match statistics.*
-                      </p>
-                  </div>
-              )}
-                {!predictionLoading && !predictionResult && !predictionError && matches.length > 0 && (
-                    <p className="no-prediction">Prediction not yet generated for this session. Search for a player to generate one!</p>
-                )}
-                 {!predictionLoading && !predictionResult && !predictionError && matches.length === 0 && (
-                    <p className="no-prediction">No Arena matches found to generate a prediction.</p>
-                )}
-            </div>
+
           </div>
         )}
 
